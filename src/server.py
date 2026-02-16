@@ -137,6 +137,26 @@ def gdrive_read_file(file_name: str, max_chars: int = 100000) -> str:
         return f"Error: {str(e)}"
 
 
+@mcp.tool()
+def gdrive_rename(file_name: str, new_name: str) -> str:
+    """
+    Rename a file in Google Drive.
+
+    Args:
+        file_name: Current name of the file to rename
+        new_name: New name for the file
+    """
+    try:
+        service = google_drive.authenticate()
+        file_info = google_drive.find_file_by_name(service, file_name)
+        if not file_info:
+            return f"File not found: {file_name}"
+        result = google_drive.rename_file(service, file_info['id'], new_name)
+        return f"Renamed '{file_name}' to '{result['name']}'"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 # =============================================================================
 # GOOGLE SHEETS TOOLS
 # =============================================================================

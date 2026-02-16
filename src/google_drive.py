@@ -14,9 +14,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from pypdf import PdfReader
 
-# Read-only access to file content and metadata
+# Full access to Drive files and Sheets
 SCOPES = [
-    'https://www.googleapis.com/auth/drive.readonly',
+    'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/spreadsheets',
 ]
 
@@ -270,6 +270,16 @@ def create_spreadsheet(sheets_service, title: str) -> tuple[str, str]:
         fields='spreadsheetId,spreadsheetUrl'
     ).execute()
     return result.get('spreadsheetId', ''), result.get('spreadsheetUrl', '')
+
+
+def rename_file(service, file_id: str, new_name: str) -> dict:
+    """Rename a file in Google Drive."""
+    return service.files().update(
+        fileId=file_id,
+        body={'name': new_name},
+        supportsAllDrives=True,
+        fields='id, name'
+    ).execute()
 
 
 def get_folder_id(service, folder_name: str) -> str | None:
