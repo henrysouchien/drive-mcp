@@ -1,0 +1,15 @@
+# Credentials & tokens
+drive_credentials.json
+token.pickle
+onedrive_token_cache.json
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Logs
+error_logs/
+
+# OS
+.DS_Store
