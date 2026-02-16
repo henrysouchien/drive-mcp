@@ -157,6 +157,29 @@ def gdrive_rename(file_name: str, new_name: str) -> str:
         return f"Error: {str(e)}"
 
 
+@mcp.tool()
+def gdrive_move(file_name: str, destination_folder: str) -> str:
+    """
+    Move a file to a different folder in Google Drive.
+
+    Args:
+        file_name: Name of the file to move
+        destination_folder: Name of the destination folder
+    """
+    try:
+        service = google_drive.authenticate()
+        file_info = google_drive.find_file_by_name(service, file_name)
+        if not file_info:
+            return f"File not found: {file_name}"
+        folder_id = google_drive.get_folder_id(service, destination_folder)
+        if not folder_id:
+            return f"Folder not found: {destination_folder}"
+        result = google_drive.move_file(service, file_info['id'], folder_id)
+        return f"Moved '{result['name']}' to '{destination_folder}'"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 # =============================================================================
 # GOOGLE SHEETS TOOLS
 # =============================================================================

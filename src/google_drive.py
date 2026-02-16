@@ -282,6 +282,23 @@ def rename_file(service, file_id: str, new_name: str) -> dict:
     ).execute()
 
 
+def move_file(service, file_id: str, new_parent_id: str) -> dict:
+    """Move a file to a different folder in Google Drive."""
+    file_info = service.files().get(
+        fileId=file_id,
+        fields='parents',
+        supportsAllDrives=True
+    ).execute()
+    previous_parents = ','.join(file_info.get('parents', []))
+    return service.files().update(
+        fileId=file_id,
+        addParents=new_parent_id,
+        removeParents=previous_parents,
+        supportsAllDrives=True,
+        fields='id, name, parents'
+    ).execute()
+
+
 def get_folder_id(service, folder_name: str) -> str | None:
     """Get the ID of a folder by name."""
     query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder'"
