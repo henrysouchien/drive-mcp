@@ -5,19 +5,16 @@ Extracted from drive_indexer.ipynb
 
 import io
 import pickle
-import re
 from pathlib import Path
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from pypdf import PdfReader
 
-# Full access to Drive files and Sheets
+# Full access to Drive files
 SCOPES = [
     'https://www.googleapis.com/auth/drive',
-    'https://www.googleapis.com/auth/spreadsheets',
 ]
 
 # Google Workspace MIME types that need export
@@ -40,7 +37,6 @@ TEXT_MIME_TYPES = [
 BASE_DIR = Path(__file__).parent.parent
 CREDENTIALS_FILE = BASE_DIR / 'drive_credentials.json'
 TOKEN_FILE = BASE_DIR / 'token.pickle'
-SPREADSHEET_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{20,}$')
 
 _cached_creds = None
 
@@ -99,177 +95,6 @@ def authenticate():
     """Authenticate with Google Drive API and return service object."""
     creds = _get_credentials()
     return build('drive', 'v3', credentials=creds)
-
-
-def get_sheets_service():
-    """Authenticate with Google Sheets API and return service object."""
-    creds = _get_credentials()
-    return build('sheets', 'v4', credentials=creds)
-
-
-def resolve_spreadsheet_id(name_or_id: str) -> tuple[str, str]:
-    """
-    Resolve a spreadsheet by ID or exact name.
-
-    Returns:
-        tuple of (spreadsheet_id, spreadsheet_title)
-    """
-    drive_service = authenticate()
-
-    if SPREADSHEET_ID_PATTERN.match(name_or_id):
-        try:
-            file_info = drive_service.files().get(
-                fileId=name_or_id,
-                supportsAllDrives=True,
-                fields='id, name, mimeType'
-            ).execute()
-            if file_info.get('mimeType') == GOOGLE_SHEET_MIME:
-                return file_info['id'], file_info['name']
-        except HttpError as e:
-            if getattr(e, 'resp', None) is None or e.resp.status != 404:
-                raise
-
-    escaped_name = name_or_id.replace("'", "\\'")
-    query = (
-        f"name = '{escaped_name}' and "
-        f"mimeType = '{GOOGLE_SHEET_MIME}' and "
-        "trashed = false"
-    )
-    results = drive_service.files().list(
-        q=query,
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True,
-        fields="files(id, name, modifiedTime, webViewLink, parents)"
-    ).execute()
-    files = results.get('files', [])
-
-    if not files:
-        raise ValueError(f"Spreadsheet not found: {name_or_id}")
-
-    if len(files) == 1:
-        file_info = files[0]
-        return file_info['id'], file_info['name']
-
-    parent_ids = set()
-    for file_info in files:
-        for parent_id in file_info.get('parents', []):
-            parent_ids.add(parent_id)
-
-    parent_names: dict[str, str] = {}
-    for parent_id in parent_ids:
-        try:
-            parent_info = drive_service.files().get(
-                fileId=parent_id,
-                supportsAllDrives=True,
-                fields='id, name'
-            ).execute()
-            parent_names[parent_id] = parent_info.get('name', '')
-        except HttpError:
-            parent_names[parent_id] = ''
-
-    candidates = [
-        "Multiple spreadsheets found. Use spreadsheet ID instead. Candidates:"
-    ]
-    for file_info in files:
-        parent_name = ''
-        parent_list = file_info.get('parents', [])
-        if parent_list:
-            parent_name = parent_names.get(parent_list[0], '')
-        candidates.append(
-            f"- id: {file_info.get('id', '')}, "
-            f"name: {file_info.get('name', '')}, "
-            f"modifiedTime: {file_info.get('modifiedTime', '')}, "
-            f"webViewLink: {file_info.get('webViewLink', '')}, "
-            f"parent: {parent_name}"
-        )
-
-    raise ValueError("\n".join(candidates))
-
-
-def list_sheet_tabs(sheets_service, spreadsheet_id: str) -> list[dict]:
-    """List tabs in a spreadsheet."""
-    spreadsheet = sheets_service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields='sheets(properties(title,index,gridProperties(rowCount,columnCount)))'
-    ).execute()
-    tabs = []
-    for sheet in spreadsheet.get('sheets', []):
-        props = sheet.get('properties', {})
-        grid = props.get('gridProperties', {})
-        tabs.append({
-            'title': props.get('title', ''),
-            'index': props.get('index', 0),
-            'rowCount': grid.get('rowCount', 0),
-            'columnCount': grid.get('columnCount', 0),
-        })
-    return tabs
-
-
-def read_sheet_range(sheets_service, spreadsheet_id: str, range_a1: str) -> list[list]:
-    """Read values from a spreadsheet range."""
-    result = sheets_service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=range_a1
-    ).execute()
-    return result.get('values', [])
-
-
-def update_sheet_range(
-    sheets_service,
-    spreadsheet_id: str,
-    range_a1: str,
-    values: list[list],
-    value_input_option: str = 'USER_ENTERED'
-) -> dict:
-    """Update a spreadsheet range with values."""
-    if not isinstance(values, list) or not values or any(not isinstance(row, list) for row in values):
-        raise ValueError("values must be a non-empty list of lists")
-
-    result = sheets_service.spreadsheets().values().update(
-        spreadsheetId=spreadsheet_id,
-        range=range_a1,
-        valueInputOption=value_input_option,
-        body={'values': values}
-    ).execute()
-    return {
-        'updatedCells': result.get('updatedCells', 0),
-        'updatedRange': result.get('updatedRange', ''),
-    }
-
-
-def append_sheet_rows(
-    sheets_service,
-    spreadsheet_id: str,
-    range_a1: str,
-    values: list[list],
-    value_input_option: str = 'USER_ENTERED',
-    insert_data_option: str = 'INSERT_ROWS'
-) -> dict:
-    """Append rows to a spreadsheet range."""
-    if not isinstance(values, list) or not values or any(not isinstance(row, list) for row in values):
-        raise ValueError("values must be a non-empty list of lists")
-
-    result = sheets_service.spreadsheets().values().append(
-        spreadsheetId=spreadsheet_id,
-        range=range_a1,
-        valueInputOption=value_input_option,
-        insertDataOption=insert_data_option,
-        body={'values': values}
-    ).execute()
-    updates = result.get('updates', {})
-    return {
-        'updatedCells': updates.get('updatedCells', 0),
-        'updatedRange': updates.get('updatedRange', ''),
-    }
-
-
-def create_spreadsheet(sheets_service, title: str) -> tuple[str, str]:
-    """Create a new spreadsheet and return its ID and URL."""
-    result = sheets_service.spreadsheets().create(
-        body={'properties': {'title': title}},
-        fields='spreadsheetId,spreadsheetUrl'
-    ).execute()
-    return result.get('spreadsheetId', ''), result.get('spreadsheetUrl', '')
 
 
 def rename_file(service, file_id: str, new_name: str) -> dict:
