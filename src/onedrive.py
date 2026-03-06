@@ -29,6 +29,7 @@ SCOPES = ["Files.Read.All", "User.Read"]
 # Token cache file
 BASE_DIR = Path(__file__).parent.parent
 TOKEN_CACHE_FILE = BASE_DIR / 'onedrive_token_cache.json'
+AUTH_FLOW_FILE = BASE_DIR / 'onedrive_auth_flow.json'
 
 # Global token storage
 _access_token = None
@@ -48,6 +49,119 @@ def _save_token_cache(cache):
         TOKEN_CACHE_FILE.write_text(cache.serialize())
 
 
+def _get_msal_app(cache):
+    """Build an MSAL public client app."""
+    return msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
+
+
+def _try_silent_refresh() -> str | None:
+    """Try silent token acquisition from cache."""
+    global _access_token
+
+    cache = _get_token_cache()
+    app = _get_msal_app(cache)
+    accounts = app.get_accounts()
+    if not accounts:
+        return None
+
+    result = app.acquire_token_silent(SCOPES, account=accounts[0])
+    if result and "access_token" in result:
+        _access_token = result["access_token"]
+        _save_token_cache(cache)
+        return _access_token
+
+    return None
+
+
+def check_auth_status() -> dict:
+    """
+    Non-destructive auth check using silent token acquisition only.
+    Returns {"authenticated": bool, "account": str | None}
+    """
+    cache = _get_token_cache()
+    app = _get_msal_app(cache)
+    accounts = app.get_accounts()
+    account_name = accounts[0].get("username") if accounts else None
+
+    token = _try_silent_refresh()
+    return {
+        "authenticated": bool(token),
+        "account": account_name,
+    }
+
+
+def start_reauth() -> dict:
+    """
+    Start non-blocking device flow and persist flow state.
+    Returns {"verification_uri", "user_code", "expires_in"}
+    """
+    cache = _get_token_cache()
+    app = _get_msal_app(cache)
+    flow = app.initiate_device_flow(scopes=SCOPES)
+
+    if "user_code" not in flow:
+        raise Exception("Failed to initiate OneDrive device flow.")
+
+    AUTH_FLOW_FILE.write_text(json.dumps(flow))
+    return {
+        "verification_uri": flow.get("verification_uri"),
+        "user_code": flow.get("user_code"),
+        "expires_in": flow.get("expires_in"),
+    }
+
+
+def poll_reauth() -> dict:
+    """
+    Poll OneDrive device flow once (non-blocking).
+    Returns {"status": "success"|"pending"|"error", ...}
+    """
+    global _access_token
+
+    if not AUTH_FLOW_FILE.exists():
+        raise Exception("No re-authentication flow in progress. Call onedrive_start_reauth() first.")
+
+    cache = _get_token_cache()
+    app = _get_msal_app(cache)
+    flow = json.loads(AUTH_FLOW_FILE.read_text())
+
+    result = app.acquire_token_by_device_flow(flow, exit_condition=lambda flow: True)
+
+    # MSAL mutates flow (latest_attempt_at / interval), so persist every poll.
+    AUTH_FLOW_FILE.write_text(json.dumps(flow))
+
+    if result and "access_token" in result:
+        _access_token = result["access_token"]
+        _save_token_cache(cache)
+        AUTH_FLOW_FILE.unlink(missing_ok=True)
+        return {
+            "status": "success",
+            "account": result.get("id_token_claims", {}).get("preferred_username"),
+        }
+
+    if not result:
+        return {
+            "status": "pending",
+            "error": "authorization_pending",
+            "error_description": "Waiting for user to complete authentication.",
+        }
+
+    error = result.get("error", "unknown_error")
+    error_description = result.get("error_description", "Unknown authentication error.")
+    if error in ("authorization_pending", "slow_down"):
+        return {
+            "status": "pending",
+            "error": error,
+            "error_description": error_description,
+        }
+
+    AUTH_FLOW_FILE.unlink(missing_ok=True)
+    return {
+        "status": "error",
+        "error": error,
+        "error_description": error_description,
+    }
+
+
 def authenticate(force_new: bool = False) -> str:
     """
     Authenticate with Microsoft Graph API.
@@ -57,7 +171,7 @@ def authenticate(force_new: bool = False) -> str:
     global _access_token
 
     cache = _get_token_cache()
-    app = msal.PublicClientApplication(CLIENT_ID, authority=AUTHORITY, token_cache=cache)
+    app = _get_msal_app(cache)
 
     # Try to get token silently from cache
     accounts = app.get_accounts()
@@ -91,10 +205,10 @@ def authenticate(force_new: bool = False) -> str:
 
 
 def _get_headers():
-    """Get authorization headers for API calls."""
+    """Get authorization headers. Never triggers interactive auth."""
     global _access_token
-    if not _access_token:
-        authenticate()
+    if not _access_token and not _try_silent_refresh():
+        raise Exception("OneDrive not authenticated. Call onedrive_start_reauth() to connect.")
     return {"Authorization": f"Bearer {_access_token}"}
 
 
@@ -102,9 +216,11 @@ def _api_get(url: str) -> dict:
     """Make GET request to Graph API."""
     response = requests.get(url, headers=_get_headers())
     if response.status_code == 401:
-        # Token expired, re-auth and retry
-        authenticate(force_new=True)
-        response = requests.get(url, headers=_get_headers())
+        if _try_silent_refresh():
+            response = requests.get(url, headers=_get_headers())
+            response.raise_for_status()
+            return response.json()
+        raise Exception("OneDrive token expired. Call onedrive_start_reauth() to renew.")
     response.raise_for_status()
     return response.json()
 
@@ -171,8 +287,11 @@ def _download_file_content(download_url: str) -> bytes:
     """Download file content from a download URL."""
     response = requests.get(download_url, headers=_get_headers())
     if response.status_code == 401:
-        authenticate(force_new=True)
-        response = requests.get(download_url, headers=_get_headers())
+        if _try_silent_refresh():
+            response = requests.get(download_url, headers=_get_headers())
+            response.raise_for_status()
+            return response.content
+        raise Exception("OneDrive token expired. Call onedrive_start_reauth() to renew.")
     response.raise_for_status()
     return response.content
 

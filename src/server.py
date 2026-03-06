@@ -286,6 +286,53 @@ def onedrive_read_file(file_path: str, max_chars: int = 100000) -> str:
         return f"Error: {str(e)}"
 
 
+@mcp.tool()
+def onedrive_start_reauth() -> str:
+    """
+    Start OneDrive re-authentication. Returns URL and code for user.
+    """
+    try:
+        result = onedrive.start_reauth()
+        return (
+            "OneDrive re-authentication started.\n\n"
+            f"1. Visit: {result['verification_uri']}\n"
+            f"2. Enter code: {result['user_code']}\n"
+            f"3. Code expires in: {result.get('expires_in')} seconds\n\n"
+            "After completing the browser step, call onedrive_complete_reauth()."
+        )
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+@mcp.tool()
+def onedrive_complete_reauth() -> str:
+    """
+    Check if OneDrive re-authentication completed. Call after user visits URL.
+    """
+    try:
+        result = onedrive.poll_reauth()
+        status = result.get("status")
+
+        if status == "success":
+            account = result.get("account")
+            if account:
+                return f"OneDrive re-authentication successful for {account}."
+            return "OneDrive re-authentication successful."
+
+        if status == "pending":
+            description = result.get("error_description", "Authorization is still pending.")
+            return (
+                "OneDrive re-authentication is still pending.\n"
+                f"{description}\n"
+                "Call onedrive_complete_reauth() again in a few seconds."
+            )
+
+        description = result.get("error_description", result.get("error", "Unknown error"))
+        return f"OneDrive re-authentication failed: {description}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
 # =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
