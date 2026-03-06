@@ -2,14 +2,23 @@
 drive_credentials.json
 token.pickle
 onedrive_token_cache.json
+onedrive_auth_flow.json
 
 # Python
 venv/
 __pycache__/
 *.pyc
+*.egg-info/
+dist/
 
 # Logs
 error_logs/
 
+# PID files
+*.pid
+
 # OS
 .DS_Store
+
+# IDE / tools
+.claude/
