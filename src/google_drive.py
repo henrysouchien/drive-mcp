@@ -124,9 +124,14 @@ def move_file(service, file_id: str, new_parent_id: str) -> dict:
     ).execute()
 
 
+def _escape_query(value: str) -> str:
+    """Escape single quotes for Drive API query strings."""
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 def get_folder_id(service, folder_name: str) -> str | None:
     """Get the ID of a folder by name."""
-    query = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder'"
+    query = f"name = '{_escape_query(folder_name)}' and mimeType = 'application/vnd.google-apps.folder'"
     results = service.files().list(
         q=query,
         spaces='drive',
@@ -178,7 +183,7 @@ def list_files_recursive(service, folder_id: str, path: str = "") -> list[dict]:
 
 def search_files(service, query: str, max_results: int = 20) -> list[dict]:
     """Search for files by name."""
-    search_query = f"name contains '{query}'"
+    search_query = f"name contains '{_escape_query(query)}'"
     results = service.files().list(
         q=search_query,
         spaces='drive',
@@ -190,7 +195,7 @@ def search_files(service, query: str, max_results: int = 20) -> list[dict]:
 
 def find_file_by_name(service, file_name: str) -> dict | None:
     """Find a file by name. Returns the first match."""
-    query = f"name = '{file_name}'"
+    query = f"name = '{_escape_query(file_name)}'"
     results = service.files().list(
         q=query,
         spaces='drive',
