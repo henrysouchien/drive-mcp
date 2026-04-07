@@ -103,6 +103,7 @@ def gdrive_search(query: str, max_results: int = 20) -> str:
         for f in files:
             icon = "📁" if f['mimeType'] == 'application/vnd.google-apps.folder' else "📄"
             result += f"{icon} {f['name']}\n"
+            result += f"   ID: {f['id']}\n"
             if f.get('modifiedTime'):
                 result += f"   Modified: {f['modifiedTime']}\n"
             if f.get('webViewLink'):
