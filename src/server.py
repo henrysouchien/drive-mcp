@@ -141,6 +141,11 @@ def gdrive_rename(file_name: str, new_name: str) -> str:
     """
     Rename a file in Google Drive.
 
+    Discovery: run `gdrive_list_folder` first to obtain `file_name` values.
+
+    Use this for: renaming files in place.
+    Not for: moving a file to a different folder — see `gdrive_move`.
+
     Args:
         file_name: Current name of the file to rename
         new_name: New name for the file
@@ -160,6 +165,11 @@ def gdrive_rename(file_name: str, new_name: str) -> str:
 def gdrive_move(file_name: str, destination_folder: str) -> str:
     """
     Move a file to a different folder in Google Drive.
+
+    Discovery: run `gdrive_list_folder` first to obtain `file_name` and `destination_folder` values.
+
+    Use this for: moving files between folders.
+    Not for: renaming a file in place — see `gdrive_rename`.
 
     Args:
         file_name: Name of the file to move
