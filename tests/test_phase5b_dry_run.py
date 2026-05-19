@@ -92,3 +92,109 @@ def test_gdrive_move_dry_run_returns_preview_without_mutation():
     get_folder_id.assert_not_called()
     move_file.assert_not_called()
     service.files.assert_not_called()
+
+
+def test_gdrive_rename_not_found_returns_structured_error():
+    server = _server_module()
+    service = Mock(name="service")
+
+    with (
+        patch.object(server.google_drive, "authenticate", return_value=service),
+        patch.object(server.google_drive, "find_file_by_name", return_value=None) as find_file,
+        patch.object(server.google_drive, "rename_file") as rename_file,
+    ):
+        result = server.gdrive_rename("Missing Doc", "New Name")
+
+    assert result == {
+        "status": "error",
+        "error_class": "FileNotFound",
+        "message": "file not found: Missing Doc",
+        "names_correction": {"file": "Run gdrive_search and use an exact returned name."},
+        "suggested_tool_calls": [{"name": "gdrive_search", "args": {"query": "Missing Doc"}}],
+    }
+    find_file.assert_called_once_with(service, "Missing Doc")
+    rename_file.assert_not_called()
+
+
+def test_gdrive_rename_returns_restore_token_and_undo_restores_name():
+    server = _server_module()
+    service = Mock(name="service")
+    file_info = {
+        "id": "file-123",
+        "name": "Old Report",
+        "mimeType": "text/plain",
+        "parents": ["folder-1"],
+    }
+
+    with (
+        patch.object(server.google_drive, "authenticate", return_value=service),
+        patch.object(server.google_drive, "find_file_by_name", return_value=file_info),
+        patch.object(server.google_drive, "rename_file", return_value={"id": "file-123", "name": "New Report"}) as rename_file,
+    ):
+        result = server.gdrive_rename("Old Report", "New Report")
+
+    assert result["status"] == "ok"
+    assert result["undo_tool"] == "gdrive_undo"
+    assert result["restore_token"]
+    rename_file.assert_called_once_with(service, "file-123", "New Report")
+
+    with (
+        patch.object(server.google_drive, "authenticate", return_value=service),
+        patch.object(server.google_drive, "rename_file", return_value={"id": "file-123", "name": "Old Report"}) as undo_rename,
+    ):
+        undo = server.gdrive_undo(result["restore_token"])
+
+    assert undo["status"] == "ok"
+    assert undo["operation"] == "gdrive_rename"
+    assert undo["name"] == "Old Report"
+    undo_rename.assert_called_once_with(service, "file-123", "Old Report")
+
+
+def test_gdrive_move_returns_restore_token_and_undo_restores_parents():
+    server = _server_module()
+    service = Mock(name="service")
+    file_info = {
+        "id": "file-456",
+        "name": "Planning Doc",
+        "mimeType": "application/vnd.google-apps.document",
+        "parents": ["folder-1"],
+    }
+
+    with (
+        patch.object(server.google_drive, "authenticate", return_value=service),
+        patch.object(server.google_drive, "find_file_by_name", return_value=file_info),
+        patch.object(server.google_drive, "get_folder_id", return_value="folder-2"),
+        patch.object(server.google_drive, "move_file", return_value={"id": "file-456", "name": "Planning Doc", "parents": ["folder-2"]}) as move_file,
+    ):
+        result = server.gdrive_move("Planning Doc", "Archive")
+
+    assert result["status"] == "ok"
+    assert result["undo_tool"] == "gdrive_undo"
+    assert result["restore_token"]
+    move_file.assert_called_once_with(service, "file-456", "folder-2")
+
+    with (
+        patch.object(server.google_drive, "authenticate", return_value=service),
+        patch.object(server.google_drive, "set_file_parents", return_value={"id": "file-456", "name": "Planning Doc", "parents": ["folder-1"]}) as set_parents,
+    ):
+        undo = server.gdrive_undo(result["restore_token"])
+
+    assert undo["status"] == "ok"
+    assert undo["operation"] == "gdrive_move"
+    assert undo["parents"] == ["folder-1"]
+    set_parents.assert_called_once_with(service, "file-456", ["folder-1"])
+
+
+def test_onedrive_error_returns_structured_envelope():
+    server = _server_module()
+
+    with patch.object(server.onedrive, "list_root_items", side_effect=RuntimeError("OneDrive not authenticated")):
+        result = server.onedrive_list_root()
+
+    assert result == {
+        "status": "error",
+        "error_class": "RuntimeError",
+        "message": "OneDrive not authenticated",
+        "names_correction": {},
+        "suggested_tool_calls": [{"name": "onedrive_start_reauth", "args": {}}],
+    }

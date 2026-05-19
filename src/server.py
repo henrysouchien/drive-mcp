@@ -3,6 +3,11 @@ MCP Server for Google Drive and OneDrive.
 Provides tools for listing and searching files in both cloud storage services.
 """
 
+import base64
+import json
+from dataclasses import dataclass
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
 
 from . import google_drive
@@ -12,12 +17,75 @@ from . import onedrive
 mcp = FastMCP("drive-mcp")
 
 
+@dataclass
+class ToolError:
+    error_class: str
+    message: str
+    names_correction: dict[str, Any] | None = None
+    suggested_tool_calls: list[dict[str, Any]] | None = None
+
+    def to_envelope(self) -> dict[str, Any]:
+        return {
+            "status": "error",
+            "error_class": self.error_class,
+            "message": self.message,
+            "names_correction": self.names_correction or {},
+            "suggested_tool_calls": self.suggested_tool_calls or [],
+        }
+
+
+def _exception_envelope(exc: Exception) -> dict[str, Any]:
+    return ToolError(
+        error_class=type(exc).__name__,
+        message=str(exc),
+        names_correction={},
+        suggested_tool_calls=_suggested_discovery_calls(str(exc)),
+    ).to_envelope()
+
+
+def _not_found_envelope(kind: str, value: str, discovery_tool: str) -> dict[str, Any]:
+    return ToolError(
+        error_class=f"{kind.title()}NotFound",
+        message=f"{kind} not found: {value}",
+        names_correction={kind: f"Run {discovery_tool} and use an exact returned name."},
+        suggested_tool_calls=[{"name": discovery_tool, "args": {"query": value}}],
+    ).to_envelope()
+
+
+def _suggested_discovery_calls(message: str) -> list[dict[str, Any]]:
+    lowered = message.lower()
+    if "onedrive" in lowered:
+        return [{"name": "onedrive_start_reauth", "args": {}}]
+    if "file" in lowered:
+        return [{"name": "gdrive_search", "args": {"query": "file name", "max_results": 20}}]
+    if "folder" in lowered:
+        return [{"name": "gdrive_search", "args": {"query": "folder name", "max_results": 20}}]
+    return []
+
+
+def _make_restore_token(payload: dict[str, Any]) -> str:
+    token_payload = {"version": 1, **payload}
+    raw = json.dumps(token_payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _parse_restore_token(restore_token: str) -> dict[str, Any]:
+    try:
+        raw = base64.urlsafe_b64decode(restore_token.encode("ascii"))
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("Invalid restore_token") from exc
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise ValueError("Invalid restore_token")
+    return payload
+
+
 # =============================================================================
 # GOOGLE DRIVE TOOLS
 # =============================================================================
 
 @mcp.tool()
-def gdrive_list_folder(folder_name: str) -> str:
+def gdrive_list_folder(folder_name: str) -> str | dict:
     """
     List files in a Google Drive folder by name.
 
@@ -29,7 +97,7 @@ def gdrive_list_folder(folder_name: str) -> str:
         folder_id = google_drive.get_folder_id(service, folder_name)
 
         if not folder_id:
-            return f"Folder '{folder_name}' not found in Google Drive."
+            return _not_found_envelope("folder", folder_name, "gdrive_search")
 
         files = google_drive.list_files_in_folder(service, folder_id)
 
@@ -47,11 +115,11 @@ def gdrive_list_folder(folder_name: str) -> str:
 
         return result
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def gdrive_list_folder_recursive(folder_name: str) -> str:
+def gdrive_list_folder_recursive(folder_name: str) -> str | dict:
     """
     Recursively list all files in a Google Drive folder and its subfolders.
 
@@ -63,7 +131,7 @@ def gdrive_list_folder_recursive(folder_name: str) -> str:
         folder_id = google_drive.get_folder_id(service, folder_name)
 
         if not folder_id:
-            return f"Folder '{folder_name}' not found in Google Drive."
+            return _not_found_envelope("folder", folder_name, "gdrive_search")
 
         files = google_drive.list_files_recursive(service, folder_id)
 
@@ -80,11 +148,11 @@ def gdrive_list_folder_recursive(folder_name: str) -> str:
 
         return result
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def gdrive_search(query: str, max_results: int = 20) -> str:
+def gdrive_search(query: str, max_results: int = 20) -> str | dict:
     """
     Search for files in Google Drive by name.
 
@@ -111,11 +179,11 @@ def gdrive_search(query: str, max_results: int = 20) -> str:
 
         return result
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def gdrive_read_file(file_name: str, max_chars: int = 100000) -> str:
+def gdrive_read_file(file_name: str, max_chars: int = 100000) -> str | dict:
     """
     Read the contents of a file from Google Drive.
 
@@ -133,7 +201,7 @@ def gdrive_read_file(file_name: str, max_chars: int = 100000) -> str:
         service = google_drive.authenticate()
         return google_drive.read_file_by_name(service, file_name, max_chars)
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
@@ -157,7 +225,7 @@ def gdrive_rename(file_name: str, new_name: str, dry_run: bool = False) -> str |
         service = google_drive.authenticate()
         file_info = google_drive.find_file_by_name(service, file_name)
         if not file_info:
-            return f"File not found: {file_name}"
+            return _not_found_envelope("file", file_name, "gdrive_search")
         if dry_run:
             current_parent = google_drive.get_parent_folder_name(service, file_info)
             return {
@@ -168,9 +236,24 @@ def gdrive_rename(file_name: str, new_name: str, dry_run: bool = False) -> str |
                 "current_parent": current_parent,
             }
         result = google_drive.rename_file(service, file_info['id'], new_name)
-        return f"Renamed '{file_name}' to '{result['name']}'"
+        restore_token = _make_restore_token(
+            {
+                "operation": "gdrive_rename",
+                "file_id": file_info["id"],
+                "restore_name": file_info.get("name") or file_name,
+                "current_name": result["name"],
+            }
+        )
+        return {
+            "status": "ok",
+            "message": f"Renamed '{file_name}' to '{result['name']}'",
+            "file_id": result["id"],
+            "name": result["name"],
+            "restore_token": restore_token,
+            "undo_tool": "gdrive_undo",
+        }
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
@@ -194,7 +277,7 @@ def gdrive_move(file_name: str, destination_folder: str, dry_run: bool = False) 
         service = google_drive.authenticate()
         file_info = google_drive.find_file_by_name(service, file_name)
         if not file_info:
-            return f"File not found: {file_name}"
+            return _not_found_envelope("file", file_name, "gdrive_search")
         if dry_run:
             current_parent = google_drive.get_parent_folder_name(service, file_info)
             return {
@@ -206,11 +289,76 @@ def gdrive_move(file_name: str, destination_folder: str, dry_run: bool = False) 
             }
         folder_id = google_drive.get_folder_id(service, destination_folder)
         if not folder_id:
-            return f"Folder not found: {destination_folder}"
+            return _not_found_envelope("folder", destination_folder, "gdrive_search")
         result = google_drive.move_file(service, file_info['id'], folder_id)
-        return f"Moved '{result['name']}' to '{destination_folder}'"
+        restore_token = _make_restore_token(
+            {
+                "operation": "gdrive_move",
+                "file_id": file_info["id"],
+                "restore_parent_ids": file_info.get("parents") or [],
+                "destination_parent_id": folder_id,
+                "destination_folder": destination_folder,
+                "file_name": result["name"],
+            }
+        )
+        return {
+            "status": "ok",
+            "message": f"Moved '{result['name']}' to '{destination_folder}'",
+            "file_id": result["id"],
+            "name": result["name"],
+            "parents": result.get("parents", []),
+            "restore_token": restore_token,
+            "undo_tool": "gdrive_undo",
+        }
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
+
+
+@mcp.tool()
+def gdrive_undo(restore_token: str) -> dict:
+    """
+    Undo a prior gdrive_rename or gdrive_move using its restore_token.
+
+    Args:
+        restore_token: Token returned by gdrive_rename or gdrive_move after a committed change
+    """
+    try:
+        payload = _parse_restore_token(restore_token)
+        service = google_drive.authenticate()
+        operation = payload.get("operation")
+
+        if operation == "gdrive_rename":
+            result = google_drive.rename_file(
+                service,
+                str(payload["file_id"]),
+                str(payload["restore_name"]),
+            )
+            return {
+                "status": "ok",
+                "operation": operation,
+                "message": f"Restored file name to '{result['name']}'",
+                "file_id": result["id"],
+                "name": result["name"],
+            }
+
+        if operation == "gdrive_move":
+            result = google_drive.set_file_parents(
+                service,
+                str(payload["file_id"]),
+                list(payload.get("restore_parent_ids") or []),
+            )
+            return {
+                "status": "ok",
+                "operation": operation,
+                "message": f"Restored '{result['name']}' to its previous parent folder(s)",
+                "file_id": result["id"],
+                "name": result["name"],
+                "parents": result.get("parents", []),
+            }
+
+        raise ValueError("restore_token operation is not supported by gdrive_undo")
+    except Exception as e:
+        return _exception_envelope(e)
 
 
 # =============================================================================
@@ -218,7 +366,7 @@ def gdrive_move(file_name: str, destination_folder: str, dry_run: bool = False) 
 # =============================================================================
 
 @mcp.tool()
-def onedrive_list_root() -> str:
+def onedrive_list_root() -> str | dict:
     """
     List items in the OneDrive root folder.
     """
@@ -239,11 +387,11 @@ def onedrive_list_root() -> str:
 
         return result
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def onedrive_list_folder(folder_path: str) -> str:
+def onedrive_list_folder(folder_path: str) -> str | dict:
     """
     List items in a OneDrive folder by path.
 
@@ -267,11 +415,11 @@ def onedrive_list_folder(folder_path: str) -> str:
 
         return result
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def onedrive_search(query: str, max_results: int = 20) -> str:
+def onedrive_search(query: str, max_results: int = 20) -> str | dict:
     """
     Search for files in OneDrive by name.
 
@@ -296,11 +444,11 @@ def onedrive_search(query: str, max_results: int = 20) -> str:
 
         return result
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def onedrive_read_file(file_path: str, max_chars: int = 100000) -> str:
+def onedrive_read_file(file_path: str, max_chars: int = 100000) -> str | dict:
     """
     Read the contents of a file from OneDrive.
 
@@ -318,11 +466,11 @@ def onedrive_read_file(file_path: str, max_chars: int = 100000) -> str:
     try:
         return onedrive.read_file_by_path(file_path, max_chars)
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def onedrive_start_reauth() -> str:
+def onedrive_start_reauth() -> str | dict:
     """
     Start OneDrive re-authentication. Returns URL and code for user.
     """
@@ -336,11 +484,11 @@ def onedrive_start_reauth() -> str:
             "After completing the browser step, call onedrive_complete_reauth()."
         )
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 @mcp.tool()
-def onedrive_complete_reauth() -> str:
+def onedrive_complete_reauth() -> str | dict:
     """
     Check if OneDrive re-authentication completed. Call after user visits URL.
     """
@@ -363,9 +511,14 @@ def onedrive_complete_reauth() -> str:
             )
 
         description = result.get("error_description", result.get("error", "Unknown error"))
-        return f"OneDrive re-authentication failed: {description}"
+        return ToolError(
+            error_class="OneDriveReauthFailed",
+            message=f"OneDrive re-authentication failed: {description}",
+            names_correction={},
+            suggested_tool_calls=[{"name": "onedrive_start_reauth", "args": {}}],
+        ).to_envelope()
     except Exception as e:
-        return f"Error: {str(e)}"
+        return _exception_envelope(e)
 
 
 # =============================================================================

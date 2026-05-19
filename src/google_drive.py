@@ -124,6 +124,25 @@ def move_file(service, file_id: str, new_parent_id: str) -> dict:
     ).execute()
 
 
+def set_file_parents(service, file_id: str, parent_ids: list[str]) -> dict:
+    """Replace a file's parent folders."""
+    file_info = service.files().get(
+        fileId=file_id,
+        fields='parents',
+        supportsAllDrives=True
+    ).execute()
+    current_parents = ','.join(file_info.get('parents', []))
+    kwargs = {
+        'fileId': file_id,
+        'removeParents': current_parents,
+        'supportsAllDrives': True,
+        'fields': 'id, name, parents',
+    }
+    if parent_ids:
+        kwargs['addParents'] = ','.join(parent_ids)
+    return service.files().update(**kwargs).execute()
+
+
 def get_parent_folder_name(service, file_info: dict) -> str | None:
     """Return the name of the file's first parent folder, if present."""
     parent_ids = file_info.get('parents') or []
