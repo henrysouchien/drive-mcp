@@ -137,7 +137,7 @@ def gdrive_read_file(file_name: str, max_chars: int = 100000) -> str:
 
 
 @mcp.tool()
-def gdrive_rename(file_name: str, new_name: str) -> str:
+def gdrive_rename(file_name: str, new_name: str, dry_run: bool = False) -> str | dict:
     """
     Rename a file in Google Drive.
 
@@ -146,15 +146,27 @@ def gdrive_rename(file_name: str, new_name: str) -> str:
     Use this for: renaming files in place.
     Not for: moving a file to a different folder — see `gdrive_move`.
 
+    Use dry_run=True to preview the change without committing.
+
     Args:
         file_name: Current name of the file to rename
         new_name: New name for the file
+        dry_run: Preview the rename without committing it
     """
     try:
         service = google_drive.authenticate()
         file_info = google_drive.find_file_by_name(service, file_name)
         if not file_info:
             return f"File not found: {file_name}"
+        if dry_run:
+            current_parent = google_drive.get_parent_folder_name(service, file_info)
+            return {
+                "dry_run": True,
+                "would_rename": file_name,
+                "to": new_name,
+                "current_id": file_info['id'],
+                "current_parent": current_parent,
+            }
         result = google_drive.rename_file(service, file_info['id'], new_name)
         return f"Renamed '{file_name}' to '{result['name']}'"
     except Exception as e:
@@ -162,7 +174,7 @@ def gdrive_rename(file_name: str, new_name: str) -> str:
 
 
 @mcp.tool()
-def gdrive_move(file_name: str, destination_folder: str) -> str:
+def gdrive_move(file_name: str, destination_folder: str, dry_run: bool = False) -> str | dict:
     """
     Move a file to a different folder in Google Drive.
 
@@ -171,15 +183,27 @@ def gdrive_move(file_name: str, destination_folder: str) -> str:
     Use this for: moving files between folders.
     Not for: renaming a file in place — see `gdrive_rename`.
 
+    Use dry_run=True to preview the change without committing.
+
     Args:
         file_name: Name of the file to move
         destination_folder: Name of the destination folder
+        dry_run: Preview the move without committing it
     """
     try:
         service = google_drive.authenticate()
         file_info = google_drive.find_file_by_name(service, file_name)
         if not file_info:
             return f"File not found: {file_name}"
+        if dry_run:
+            current_parent = google_drive.get_parent_folder_name(service, file_info)
+            return {
+                "dry_run": True,
+                "would_move": file_name,
+                "from": current_parent,
+                "to": destination_folder,
+                "current_id": file_info['id'],
+            }
         folder_id = google_drive.get_folder_id(service, destination_folder)
         if not folder_id:
             return f"Folder not found: {destination_folder}"

@@ -124,6 +124,20 @@ def move_file(service, file_id: str, new_parent_id: str) -> dict:
     ).execute()
 
 
+def get_parent_folder_name(service, file_info: dict) -> str | None:
+    """Return the name of the file's first parent folder, if present."""
+    parent_ids = file_info.get('parents') or []
+    if not parent_ids:
+        return None
+
+    parent = service.files().get(
+        fileId=parent_ids[0],
+        fields='id, name',
+        supportsAllDrives=True
+    ).execute()
+    return parent.get('name')
+
+
 def _escape_query(value: str) -> str:
     """Escape single quotes for Drive API query strings."""
     return value.replace("\\", "\\\\").replace("'", "\\'")
@@ -199,7 +213,7 @@ def find_file_by_name(service, file_name: str) -> dict | None:
     results = service.files().list(
         q=query,
         spaces='drive',
-        fields="files(id, name, mimeType)"
+        fields="files(id, name, mimeType, parents)"
     ).execute()
     files = results.get('files', [])
     return files[0] if files else None
