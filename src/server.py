@@ -91,6 +91,11 @@ def gdrive_list_folder(folder_name: str) -> str | dict:
 
     Args:
         folder_name: Name of the folder to list (e.g., "Stock Investor Accelerator")
+
+    Discovery: use gdrive_search first when the exact folder_name is unknown.
+
+    Sibling tools: use gdrive_list_folder_recursive to include subfolders and
+    gdrive_read_file to read a discovered file.
     """
     try:
         service = google_drive.authenticate()
@@ -125,6 +130,11 @@ def gdrive_list_folder_recursive(folder_name: str) -> str | dict:
 
     Args:
         folder_name: Name of the folder to list (e.g., "Stock Investor Accelerator")
+
+    Discovery: use gdrive_search first when the exact folder_name is unknown.
+
+    Sibling tools: use gdrive_list_folder for a shallow listing and
+    gdrive_read_file to read a discovered file.
     """
     try:
         service = google_drive.authenticate()
@@ -196,6 +206,9 @@ def gdrive_read_file(file_name: str, max_chars: int = 100000) -> str | dict:
     Args:
         file_name: Name of the file to read (e.g., "My Document" or "report.pdf")
         max_chars: Maximum characters to return (default: 100000)
+
+    Discovery: use gdrive_search, gdrive_list_folder, or
+    gdrive_list_folder_recursive first to find the exact file_name.
     """
     try:
         service = google_drive.authenticate()
@@ -369,6 +382,9 @@ def gdrive_undo(restore_token: str) -> dict:
 def onedrive_list_root() -> str | dict:
     """
     List items in the OneDrive root folder.
+
+    Sibling tools: use onedrive_list_folder for nested folders and
+    onedrive_read_file to read a discovered file.
     """
     try:
         items = onedrive.list_root_items()
@@ -397,6 +413,12 @@ def onedrive_list_folder(folder_path: str) -> str | dict:
 
     Args:
         folder_path: Path to the folder (e.g., "Documents/Projects" or "Stock Investor Accelerator")
+
+    Discovery: use onedrive_list_root or onedrive_search first when the exact
+    folder_path is unknown.
+
+    Sibling tools: use onedrive_list_root for the top-level folder and
+    onedrive_read_file to read a discovered file.
     """
     try:
         items = onedrive.list_folder_by_path(folder_path)
@@ -462,6 +484,9 @@ def onedrive_read_file(file_path: str, max_chars: int = 100000) -> str | dict:
     Args:
         file_path: Path to the file (e.g., "Documents/report.pdf" or "Stock Investor Accelerator/notes.txt")
         max_chars: Maximum characters to return (default: 100000)
+
+    Discovery: use onedrive_search, onedrive_list_root, or
+    onedrive_list_folder first to find the exact file_path.
     """
     try:
         return onedrive.read_file_by_path(file_path, max_chars)
