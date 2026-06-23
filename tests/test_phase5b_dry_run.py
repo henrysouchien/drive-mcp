@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import inspect
+from pathlib import Path
 import sys
 import types
 from unittest.mock import Mock, patch
@@ -18,6 +19,21 @@ def _server_module():
 def _registered_tool_fn(server, tool_name):
     tool = server.mcp._tool_manager._tools[tool_name]
     return getattr(tool, "fn", None) or getattr(tool, "func", None)
+
+
+def test_google_drive_credential_paths_can_be_overridden_by_env(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CREDENTIALS_FILE", "/tmp/drive-credentials.json")
+    monkeypatch.setenv("GOOGLE_TOKEN_FILE", "/tmp/drive-token.pickle")
+    google_drive = importlib.import_module("src.google_drive")
+    google_drive = importlib.reload(google_drive)
+
+    try:
+        assert google_drive.CREDENTIALS_FILE == Path("/tmp/drive-credentials.json")
+        assert google_drive.TOKEN_FILE == Path("/tmp/drive-token.pickle")
+    finally:
+        monkeypatch.delenv("GOOGLE_CREDENTIALS_FILE", raising=False)
+        monkeypatch.delenv("GOOGLE_TOKEN_FILE", raising=False)
+        importlib.reload(google_drive)
 
 
 def test_phase5b_dry_run_params_are_in_tool_signatures():

@@ -4,6 +4,7 @@ Extracted from drive_indexer.ipynb
 """
 
 import io
+import os
 import pickle
 from pathlib import Path
 from googleapiclient.discovery import build
@@ -35,8 +36,10 @@ TEXT_MIME_TYPES = [
 
 # Paths relative to this module's parent directory
 BASE_DIR = Path(__file__).parent.parent
-CREDENTIALS_FILE = BASE_DIR / 'drive_credentials.json'
-TOKEN_FILE = BASE_DIR / 'token.pickle'
+CREDENTIALS_FILE = Path(
+    os.environ.get("GOOGLE_CREDENTIALS_FILE") or BASE_DIR / 'drive_credentials.json'
+)
+TOKEN_FILE = Path(os.environ.get("GOOGLE_TOKEN_FILE") or BASE_DIR / 'token.pickle')
 
 _cached_creds = None
 
