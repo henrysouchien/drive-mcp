@@ -7,8 +7,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER_PATH = REPO_ROOT / "src" / "server.py"
 
 TOOLS = {
-    "gdrive_rename": ("gdrive_move", "gdrive_read_file"),
-    "gdrive_move": ("gdrive_rename",),
+    "gdrive_rename": ("gdrive_move", "gdrive_read_file", "gdrive_create_folder"),
+    "gdrive_move": ("gdrive_rename", "gdrive_create_folder"),
+    "gdrive_create_folder": ("gdrive_rename", "gdrive_move", "gdrive_create_doc"),
+    "gdrive_write_file": ("gdrive_create_doc",),
+    "gdrive_create_doc": ("gdrive_write_file", "gdrive_create_folder"),
+    "gdrive_copy": ("gdrive_move",),
+    "gdrive_trash": ("gdrive_search",),
+    "gdrive_share": ("gdrive_search",),
+    "gdrive_download_file": ("gdrive_read_file",),
 }
 
 
@@ -45,7 +52,7 @@ def test_phase5a_tools_have_discovery_contracts():
 
     for tool_name, doc in docs.items():
         assert "Discovery:" in doc, tool_name
-        assert "gdrive_list_folder" in doc, tool_name
+        assert "gdrive_list_folder" in doc or "gdrive_search" in doc, tool_name
 
 
 def test_phase5a_tools_have_sibling_disambiguation_contracts():

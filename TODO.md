@@ -1,6 +1,6 @@
 # drive-mcp TODO
 
-## gdrive_search: surface file IDs in results
+## ~~gdrive_search: surface file IDs in results~~ DONE
 
 `gdrive_search` currently formats results with name + link but omits the file ID:
 
@@ -24,3 +24,11 @@ The underlying `search_files()` in `google_drive.py` already returns `id` in eac
 ```
 
 **Where:** `src/server.py` lines 103-109, `gdrive_search` function.
+
+**Resolved:** `gdrive_search` emits a dedicated `ID:` line immediately after
+each result name. A behavioral regression test now proves the raw ID is exposed
+before modification/link metadata and that the requested result limit reaches
+the Drive adapter. The repository test bootstrap also now pins this repo's
+generic `src` package, preventing shared development environments from silently
+importing another MCP repository's `src.server`. Full suite: 11 passed; Ruff
+passes for the affected files (2026-07-15).
